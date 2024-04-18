@@ -1,10 +1,17 @@
 from os import path
-from sys import stderr
+from sys import stderr, exit
 import json
 from random import choice, randint
-from openai import OpenAI as LLM
-from colorama import init, Fore, Back, Style
-init(autoreset=True)
+
+try:
+    from openai import OpenAI as LLM
+    from colorama import init, Fore, Back, Style
+    init(autoreset=True)
+except:
+    print("Error: The environment is not set up correctly.", file=sys.stderr)
+    print("Ensure you have activated the correct virtual environment.", file=sys.stderr)
+    print('Run "source mistranrtvenv/bin/activate" in your terminal', file=sys.stderr)
+    exit(1)
 
 TOPIC_CHANGE_FREQ = 4
 ASK_OPINION_RULETTE = 4
@@ -21,6 +28,21 @@ TEXT_COLORS = [Fore.RED,
                Fore.MAGENTA,
                Fore.CYAN,
                Fore.WHITE]
+
+client = LLM(
+    api_key="EMPTY",
+    base_url="http://localhost:8000/v1"
+)
+
+#try:
+#    model_lst = openai.Model.list()
+#    if VERBOSITY:
+#        print("Models:")
+#        for i in model_lst['data']:
+#            print(i['id'])
+#except:
+
+
 
 def remove_first_sentence_and_word(text):
     sentences = text.split('. ')
@@ -62,10 +84,6 @@ def print_introductions_for(participants):
             remove_first_sentence_and_word(p['prompt'])) )
     print()
 
-client = LLM(
-    api_key="EMPTY",
-    base_url="http://localhost:8000/v1"
-)
 
 # Get participants.
 participants = read_participants()
@@ -148,7 +166,7 @@ for turns_left in range(DISCUSSION_LENGTH, 0, -1):
         reply = nametag + " " + reply
     print(participant['color']+reply+"\n\n")
 
-    OUTFILE
+    #OUTFILE
 
     # Check if a name was mentioned in the latter half.
     mentioned_at = -1
