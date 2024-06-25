@@ -9,18 +9,30 @@ try:
     init(autoreset=True)
 except:
     print("Error: The environment is not set up correctly.", file=sys.stderr)
-    print("Ensure you have activated the correct virtual environment.", file=sys.stderr)
-    print('Run "source mistranrtvenv/bin/activate" in your terminal', file=sys.stderr)
+    print("Ensure you have created and activated the correct virtual environment.", file=sys.stderr)
+    print('E.g., run "source mistranrtvenv/bin/activate" in your terminal', file=sys.stderr)
     exit(1)
 
-TOPIC_CHANGE_FREQ = 4
-ASK_OPINION_RULETTE = 4
-DISCUSSION_LENGTH = 20 # how many turns of speech
-WRAP_UP_TURNS = 3 #This many turns to wrap up.
-VERBOSITY = 0
-OUTFILE = "output.txt"
-GIVE_INTRODUCTIONS = True
+# The more roulette slots there are, the more infrequent the event is.
+# Can be interpreted to control to "do/change, in average, after this many turns".
+TOPIC_CHANGE_FREQ_ROULETTE_SLOTS = 4 # Controls how often a random new question is chosen
+ASK_OPINION_ROULETTE_SLOTS = 4 # Controls how often agents are prompted to ask for opinions of others
 
+GIVE_INTRODUCTIONS = True # If the participants are introduced to each other before the roundtable starts
+DISCUSSION_LENGTH = 20 # Controls how many turns of speech.
+WRAP_UP_TURNS = 3 # Allow this many turns for the agents to wrap up.
+
+# Some pieces of the prompt, mind the whitespace to avoid messy formatting
+FILLER_MESSAGE = "This has been an intriguing discussion so far. Let's continue."
+LIST_PARTICIPANTS = "The discussion is between "
+GIVE_TOPIC_THEME = " The discussion revolves around "
+GIVE_NEW_TOPIC = "\n\nYou are now discussing on "
+ASK_2ND_OPINION = " Acknowledge the ideas of others and occasionally ask for second opinion. "
+TIME_INFO = " You have {} minutes left."
+WRAP_UP = " Time to wrap up!"
+
+# Controls the output
+VERBOSITY = 0
 TEXT_COLORS = [Fore.RED,
                Fore.GREEN,
                Fore.YELLOW,
@@ -29,20 +41,15 @@ TEXT_COLORS = [Fore.RED,
                Fore.CYAN,
                Fore.WHITE]
 
+# Use the agent from here
 client = LLM(
     api_key="EMPTY",
     base_url="http://localhost:8000/v1"
 )
 
-#try:
-#    model_lst = openai.Model.list()
-#    if VERBOSITY:
-#        print("Models:")
-#        for i in model_lst['data']:
-#            print(i['id'])
-#except:
-
-
+#########################
+# SOME HELPER FUNCTIONS #
+#########################
 
 def remove_first_sentence_and_word(text):
     sentences = text.split('. ')
@@ -59,7 +66,7 @@ def read_participants():
     pid = 0
     while True:
         pid+=1
-        filename = f"role{pid}.json"
+        filename = f"participants/role{pid}.json"
         if not path.exists(filename):
             break
         with open(filename, "r") as file:
@@ -69,11 +76,12 @@ def read_participants():
     return participants
 
 def massage_to_expected_back_and_forth_format(messages):
+    """ Some models require alternating user and assistant roles in the messages list.
+    Hence, sometimes a filler is needed and this sentence is used. """
     for i, m in enumerate(messages):
         m['role'] = 'user' if i%2==0 else 'assistant'
     if  messages and messages[-1]['role']=='user':
-        messages.append({'role': 'assistant',
-            'content': "This has been a good discussion. Let's continue."})
+        messages.append({'role': 'assistant', 'content': FILLER_MESSAGE})
         return True
     return False
 
@@ -85,6 +93,10 @@ def print_introductions_for(participants):
     print()
 
 
+##########################
+# THE MAIN SCRIPT STARTS #
+##########################
+
 # Get participants.
 participants = read_participants()
 names = [p['name'] for p in participants]
@@ -92,17 +104,17 @@ names_string = ', '.join(names[:-1]) + ' and ' + names[-1] if len(names) > 1 els
 
 # Read context
 context = ""
-with open("context.txt", "r") as file:
+with open("task/context.txt", "r") as file:
     context  = file.read().strip()
 
 # Read general instuctions
 instructions = ""
-with open("instructions.txt", "r") as file:
+with open("task/instructions.txt", "r") as file:
     instructions  = file.read().strip()
 
 # Read questions
 questions = []
-with open("questions2.txt", "r") as file:
+with open("task/questions.txt", "r") as file:
     questions = file.readlines()
 
 # Start the discussion
@@ -111,8 +123,9 @@ topic = ""
 added_dummy = False
 next_participant = None
 prev_participant = None
+
 for turns_left in range(DISCUSSION_LENGTH, 0, -1):
-    # The API assumes back and forth, emulate it  
+    # The API assumes back and forth, emulate it
     added_dummy = massage_to_expected_back_and_forth_format(messages)
 
     # Build the prompt
@@ -122,30 +135,32 @@ for turns_left in range(DISCUSSION_LENGTH, 0, -1):
         print(context)
         prompt+=context+"\n\n"
         # Introduces the names to agents to give better context.
-        prompt+="The discussion is between "+names_string+"."
+        prompt+=LIST_PARTICIPANTS+names_string+"."
         if GIVE_INTRODUCTIONS:
             print_introductions_for(participants)
-        print(" The discussion revolves around "+questions[0])
+        print(GIVE_TOPIC_THEME+questions[0])
 
-    # Choose person to speak
+    # Choose a random person to speak, if no participant was expliclity asked to contribute
     participant = choice(participants) if not next_participant else next_participant
     if participant==prev_participant:
-        # Avoid twice per row, but it is not hard constraint
+        # Avoid twice per row, but it is not a hard constraint
         participant = choice(participants)
+
     nametag = participant['name']+":"
     prev_participant = participant
     prompt+="\n\n"+participant['prompt']
 
-    if not topic or randint(0, TOPIC_CHANGE_FREQ): 
+    # Check if it is time to choose another question.
+    if not topic or randint(0, TOPIC_CHANGE_FREQ_ROULETTE_SLOTS): 
         topic = choice(questions)
-        prompt+="\n\nYou are now discussing on "+topic.strip()
+        prompt+=GIVE_NEW_TOPIC+topic.strip()
     
     prompt+="\n\n"+instructions
-    if randint(0,ASK_OPINION_RULETTE)==0:
-        prompt+=" Acknowledge the ideas of others and occasionally ask for second opinion. "
-    prompt+=f" You have {turns_left} minutes left."
+    if randint(0,ASK_OPINION_ROULETTE_SLOTS)==0:
+        prompt+=ASK_2ND_OPINION
+    prompt += TIME_INFO.format(turns_left)
     if turns_left<=WRAP_UP_TURNS:
-        prompt+=" Time to wrap up!"
+        prompt+=WRAP_UP
     prompt+="\n\n"+nametag+" "
 
     # Build the call and ask for the completion
@@ -166,8 +181,6 @@ for turns_left in range(DISCUSSION_LENGTH, 0, -1):
         reply = nametag + " " + reply
     print(participant['color']+reply+"\n\n")
 
-    #OUTFILE
-
     # Check if a name was mentioned in the latter half.
     mentioned_at = -1
     next_participant = None
@@ -180,8 +193,10 @@ for turns_left in range(DISCUSSION_LENGTH, 0, -1):
             next_participant = p
     
     # Manage discussion history
-    messages.pop()
+    messages.pop() # pop the (user) prompt
     if added_dummy:
         messages.pop()
         added_dummy = False
     messages.append({'role': 'assistant', 'content': reply})
+
+# TODO: Use the LLM to summarize the discussion and lift 3-5 main points from there.

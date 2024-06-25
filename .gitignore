@@ -163,3 +163,4 @@ cython_debug/
 # venvs
 crewaicondaenv
 mistranrtvenv
+.mistralenv
