@@ -19,7 +19,7 @@ TOPIC_CHANGE_FREQ_ROULETTE_SLOTS = 4 # Controls how often a random new question 
 ASK_OPINION_ROULETTE_SLOTS = 4 # Controls how often agents are prompted to ask for opinions of others
 
 GIVE_INTRODUCTIONS = True # If the participants are introduced to each other before the roundtable starts
-DISCUSSION_LENGTH = 20 # Controls how many turns of speech.
+DISCUSSION_LENGTH = 10 # Controls how many turns of speech.
 WRAP_UP_TURNS = 3 # Allow this many turns for the agents to wrap up.
 
 # Some pieces of the prompt, mind the whitespace to avoid messy formatting
