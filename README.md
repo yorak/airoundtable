@@ -4,7 +4,7 @@ This is a simple script that sets up a roundtable of AI agents for a discussion 
 
 ![example discussion](./docs/run_roundtable.gif)
 
-* An example of agents discussing *
+*An example of agents discussing*
 
 ## Description
 
