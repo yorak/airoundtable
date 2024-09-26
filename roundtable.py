@@ -2,6 +2,7 @@ from os import path
 from sys import stderr, exit
 import json
 from random import choice, randint
+from collections import Counter
 
 try:
     from openai import OpenAI as LLM
@@ -41,11 +42,28 @@ TEXT_COLORS = [Fore.RED,
                Fore.CYAN,
                Fore.WHITE]
 
-# Use the agent from here
-client = LLM(
-    api_key="EMPTY",
-    base_url="http://localhost:8000/v1"
-)
+
+
+# Set up the LLM
+
+KEYFILE_NAME = "openai.key"
+if path.exists(KEYFILE_NAME):
+    with open(KEYFILE_NAME, 'r') as kf:
+        credentials = json.load(kf)
+        # Use OpenAI's cloud-hosted API
+        client = LLM(
+            api_key=credentials['api_key'],
+            organization=credentials.get('organization', None),
+            project=credentials.get('organprojectization', None),
+        )
+    MODEL_NAME = "gpt-4o-mini"
+else:
+    # Otherwise, default to the local LLM API
+    client = LLM(
+        api_key="EMPTY",
+        base_url="http://localhost:8000/v1"
+    )
+    MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2",
 
 #########################
 # SOME HELPER FUNCTIONS #
@@ -61,7 +79,7 @@ def remove_first_sentence_and_word(text):
     modified_text = '. '.join(sentences)
     return modified_text
 
-def read_participants():
+def read_participants(default_creativity=0.7):
     participants = []
     pid = 0
     while True:
@@ -72,6 +90,8 @@ def read_participants():
         with open(filename, "r") as file:
             participant = json.load(file)
             participant['color'] = TEXT_COLORS[pid]
+            if 'creativity' not in participant:
+                participant['creativity'] = default_creativity
             participants.append(participant)
     return participants
 
@@ -103,19 +123,20 @@ names = [p['name'] for p in participants]
 names_string = ', '.join(names[:-1]) + ' and ' + names[-1] if len(names) > 1 else ''.join(names)
 
 # Read context
-context = ""
 with open("task/context.txt", "r") as file:
     context  = file.read().strip()
 
 # Read general instuctions
-instructions = ""
-with open("task/instructions.txt", "r") as file:
-    instructions  = file.read().strip()
+with open("task/discuss_instructions.txt", "r") as file:
+    discuss_instructions  = file.read().strip()
 
 # Read questions
-questions = []
 with open("task/questions.txt", "r") as file:
     questions = file.readlines()
+
+# Read questions
+with open("task/summarize_instructions.txt", "r") as file:
+    summarize_instructions  = file.read().strip()
 
 # Start the discussion
 messages = []
@@ -123,6 +144,7 @@ topic = ""
 added_dummy = False
 next_participant = None
 prev_participant = None
+named_turns = []
 
 for turns_left in range(DISCUSSION_LENGTH, 0, -1):
     # The API assumes back and forth, emulate it
@@ -145,6 +167,7 @@ for turns_left in range(DISCUSSION_LENGTH, 0, -1):
     if participant==prev_participant:
         # Avoid twice per row, but it is not a hard constraint
         participant = choice(participants)
+    named_turns.append(participant['name'])
 
     nametag = participant['name']+":"
     prev_participant = participant
@@ -155,7 +178,7 @@ for turns_left in range(DISCUSSION_LENGTH, 0, -1):
         topic = choice(questions)
         prompt+=GIVE_NEW_TOPIC+topic.strip()
     
-    prompt+="\n\n"+instructions
+    prompt+="\n\n"+discuss_instructions
     if randint(0,ASK_OPINION_ROULETTE_SLOTS)==0:
         prompt+=ASK_2ND_OPINION
     prompt += TIME_INFO.format(turns_left)
@@ -168,9 +191,9 @@ for turns_left in range(DISCUSSION_LENGTH, 0, -1):
     if VERBOSITY>0:
         print(Style.DIM + ('DEBUG: Prompt the AI with "'+prompt+'"'), file=stderr)
     chat_response = client.chat.completions.create(
-        model="mistralai/Mistral-7B-Instruct-v0.2",
+        model=MODEL_NAME,
         messages=messages,
-        temperature=0.7 if not 'creativity' in participant else participant['creativity']
+        temperature=participant['creativity']
     )
     #TODO: experiment with other parameters? https://docs.vllm.ai/en/latest/dev/sampling_params.html
     
@@ -199,4 +222,33 @@ for turns_left in range(DISCUSSION_LENGTH, 0, -1):
         added_dummy = False
     messages.append({'role': 'assistant', 'content': reply})
 
-# TODO: Use the LLM to summarize the discussion and lift 3-5 main points from there.
+## SUMMARIZATION
+
+massage_to_expected_back_and_forth_format(messages)
+
+# The person that talked the most will summarize.
+most_talkative, _ = Counter(named_turns).most_common(1)[0]
+summarizing_participant = next((d for d in participants if d['name'] == most_talkative), None)
+nametag = summarizing_participant['name']+":"
+prompt+="\n\n"+summarizing_participant['prompt']
+prompt+="\n\n"+summarize_instructions
+
+# DO the summarization call
+messages.append({'role': 'user', 'content': prompt})
+if VERBOSITY>0:
+    print(Style.DIM + ('DEBUG: Prompt the AI with "'+prompt+'"'), file=stderr)
+chat_response = client.chat.completions.create(
+    model=MODEL_NAME,
+    messages=messages,
+    temperature=participant['creativity']
+)
+
+# Show the summarizing remarks.
+reply = chat_response.choices[0].message.content.strip()\
+        .replace("Assistant:",nametag )
+if not reply.startswith(nametag):
+    reply = nametag + " " + reply
+print(participant['color']+reply+"\n\n")
+
+# We are done here.
+
